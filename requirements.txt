@@ -1,0 +1,6 @@
+scipy
+numpy
+matplotlib
+pathos
+hashlib
+pandas
