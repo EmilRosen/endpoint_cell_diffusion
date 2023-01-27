@@ -1,17 +1,25 @@
+import json;
+import numpy as np;
+import pandas as pd;
+
+import simulation;
+import utils;
+
 ###########
 ## Input ##
 ###########
 
-input_folder = "test_samples";			# Preloaded with 
+input_folder = "test_samples/";			# Preloaded with 
 input_pattern = "{}.json";				# Only load files with this filepattern
 output_folder = None;
 
-number_of_simulations = 100;
-acceptance_treheshold  = 10;		# Percentage of accepted parameters
+number_of_simulations = 10000;
+acceptance_treheshold  = 1;				# Percentage of accepted parameters
 n_jobs = 1;
 
 # Size of measurable area (match image size, units is in microns in the example)
 measure_rect_side = 702 // 2;
+measure_rect = [-measure_rect_side, -measure_rect_side, measure_rect_side, measure_rect_side];
 
 # Simulation arena size [left, bottom, right, top]
 # Make e.g 30% larger than the measure rect
@@ -36,9 +44,9 @@ simulation_parameters = {
 
 # Contains uniform parameter priors ([min, max]) for the three non-static parameters. 
 parameter_priors = {
-	log10_alpha = [-6, -5], 	# Division rate (log 10 divisions / second)
-	log10_d     = [-2, 1] , 	# Diffusion constant (log 10 microns^2 / 2)
-	r 		    = [2, 20] , 	# Cell radius
+	"log10_alpha": [-6, -4.8], 	# Division rate (log 10 divisions / second)
+	"log10_d":     [-2, 1] , 	# Diffusion constant (log 10 microns^2 / 2)
+	"r": 		   [2, 20] , 	# Cell radius
 };
 
 #######################
@@ -61,12 +69,12 @@ def get_summary_and_parameters(seed):
 
 	P, drawn_parameters, ecode = run_simulation(seed); 
 
-	pc, radii = pairCorrelation(P, params["measure_rect"], params["rMax"], params["dr"]);
+	pc, radii = utils.pairCorrelation(P, params["measure_rect"], params["rMax"], params["dr"]);
 	pc[np.isnan(pc)] = 0;
 
-	N = particlesInRectangle(P, params["measure_rect"]);
+	N = utils.particlesInRectangle(P, params["measure_rect"]);
 
-	return params, np.array([N] + list(pc)), drawn_parameters, ecode;
+	return np.array([N] + list(pc)), drawn_parameters, ecode;
 
 '''
 Run a simulation given parameter values and parameter priors. 
@@ -94,7 +102,7 @@ def run_simulation(seed):
 
 	collision_function = simulation.createRigidPotential(params["repulsion_force"], 2 * size);
 	
-	sim = simulation.Simulation(minTimeStep=params["simulation_step"], initialParticles=params["num_particles"], maxParticles=params["max_particles"], particleSpeed=cellSpeed, arena=arena, particleCollision=particleCollision, particleCollisionMaxDistance=2 * size, events=events, rs=rs);
+	sim = simulation.Simulation(minTimeStep=params["simulation_step"], initialParticles=params["num_particles"], maxParticles=params["max_particles"], particleSpeed=cellSpeed, arena=arena, particleCollision=collision_function, particleCollisionMaxDistance=2 * size, events=events, rs=rs);
 
 	## Run Simulation
 	P, ecode = sim.simulate(params["simulation_length"]);
@@ -118,25 +126,19 @@ def compute_distance(S1, S2):
 ################
 ## Initialize ##
 ################
-simulation_cache_path = output_folder + "/SimulationCache";
-
-utils.defineOutput(simulation_cache_path);
-
 if output_folder is None:
 	raise Exception("Error: You need to set an output folder in run.py");
 
-#####################
-## Run simulations ##
-#####################
-
+simulation_cache_path = output_folder + "/SimulationCache/";
 utils.defineOutput(simulation_cache_path);
-
-cache = utils.CachedSummaryStatistics(simulation_cache_path, {**simulation_parameters, **parameter_priors});
-cache.getCachedSummaryStatistics(number_of_simulations, get_summary_and_parameters, numThreads=n_jobs)
 
 #############
 ## Run ABC ##
 #############
+
+print("Run ABC");
+
+cache = utils.CachedSummaryStatistics(simulation_cache_path, {**simulation_parameters, **parameter_priors});
 
 files = utils.getInputFiles(input_pattern, input_folder);
 
@@ -148,7 +150,7 @@ for file in files:
 
 		## Format the measured summary statistics from the observation
 		get_observation = lambda: np.array([summary["cell_number"]] + summary["pcf"]);
-		get_simulation  = cache.getCachedSummaryStatistics(number_of_simulations).__next__;
+		get_simulation  = cache.getSummaryStatistics(number_of_simulations, get_summary_and_parameters, numThreads=n_jobs).__next__;
 
 		parameters, accepted, distances = utils.solve(
 			distanceFunction = compute_distance,
@@ -166,7 +168,7 @@ for file in files:
 		distances  = distances[F];
 
 		for n in range(distances.size):
-			rows.append({
+			accepted_simulations.append({
 				"File"				 : file["file"],
 				"Log10Diffusion"     : parameters[n, 0],
 				"Log10Proliferation" : parameters[n, 1],
@@ -175,11 +177,13 @@ for file in files:
 			});
 
 df = pd.DataFrame(accepted_simulations);
-df.to_csv("accepted_simulations.csv", sep="\t", index=False);
+df.to_csv(output_folder + "/accepted_simulations.csv", sep="\t", index=False);
 
 ##################
 ## Compute mode ##
 ##################
-df = df.groupby("File").apply(lambda df: [{key: utils.find_mode(df[key]) for key in ["Log10Proliferation", "Log10Diffusion", "CellRadius"]}]);
-df.to_csv("computed_modes.csv", sep="\t", index=False);
+print("Compute mode");
+
+df = df.groupby("File").apply(lambda df: pd.DataFrame([{key: utils.find_mode(df[key].values) for key in ["Log10Proliferation", "Log10Diffusion", "CellRadius"]}]));
+df.to_csv(output_folder + "/computed_modes.csv", sep="\t");
 

@@ -10,10 +10,6 @@ import hashlib;
 
 from functools import partial;
 
-## Needed functions
-defineOutput
-getInputFiles
-
 
 '''
 Find mode of a posterior
@@ -121,7 +117,7 @@ def pairCorrelation(P, rect, rMax, dr):
 
 	areas = np.pi * np.diff(edges**2);		# Area of donut shaped strips
 
-	results, VOID = np.histogram(D.flatten(), bins=edges, normed=False);	# Count number of particles in each donut-shaped bin
+	results, VOID = np.histogram(D.flatten(), bins=edges);	# Count number of particles in each donut-shaped bin
 
 	results = results / (np.sum(interior) * areas * density);
 

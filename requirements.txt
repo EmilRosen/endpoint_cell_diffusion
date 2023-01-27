@@ -1,6 +1,7 @@
-scipy
 numpy
-matplotlib
-pathos
-hashlib
 pandas
+pathos
+parse
+scipy
+matplotlib
+pillow
